@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """CROUS IdF bot: banner Telegram épinglé (mis à jour en direct), boutons interactifs, alertes."""
-import json, os, sys, time, urllib.error, urllib.request
+import json, os, re, sys, time, urllib.error, urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -20,7 +20,7 @@ except Exception:
     TZ = None
 
 S = {"items": {}, "checks": 0, "last": None, "err": None, "seen": None,
-     "banner_id": None, "paused": False, "check_now": False}
+     "banner_id": None, "paused": False, "check_now": False, "total": 0}
 
 
 def now_str():
@@ -63,7 +63,7 @@ def banner_text():
         head = "🟢 CROUS IdF — surveillance active"
     body = (f"🏠 {n} logement(s) en Île-de-France" if n
             else "😴 Aucun logement disponible pour le moment")
-    lines = [head, body, f"🕒 Dernière vérif : {S['last'] or '...'}",
+    lines = [head, body, f"🇫🇷 {S['total']} annonce(s) CROUS au total (toute la France)", f"🕒 Dernière vérif : {S['last'] or '...'}",
              f"🔁 Check #{S['checks']} · toutes les {POLL_INTERVAL} s"]
     if S["err"]:
         lines.append(f"⚠️ {S['err'][:100]}")
@@ -91,11 +91,12 @@ def link(acc_id):
 def alert_new(i):
     res = i.get("residence", {})
     r = rent(i)
-    tg("sendMessage", chat_id=TG_CHAT, text=(
+    r = tg("sendMessage", chat_id=TG_CHAT, text=(
         f"🏠 NOUVEAU LOGEMENT CROUS\n\n{res.get('label','?')}\n{i.get('label','')}\n"
         f"📍 {res.get('address','')}\n💶 {f'{r:.0f} €' if r is not None else '?'}"),
        reply_markup={"inline_keyboard": [[{"text": "🔗 Ouvrir le logement",
                                            "url": link(i["id"])}]]})
+    return bool(r.get("ok"))
 
 
 def list_text():
@@ -139,11 +140,13 @@ def handle(u):
 
 
 # ---------------- CROUS ----------------
+POSTAL = re.compile(r"(?<!\d)(\d{5})(?!\d)")
+
+
 def is_idf(acc):
-    for p in acc.get("residence", {}).get("address", "").split():
-        if len(p) == 5 and p.isdigit():
-            return p[:2] in IDF
-    return False
+    addr = acc.get("residence", {}).get("address", "") or ""
+    m = POSTAL.search(addr)
+    return bool(m) and m.group(1)[:2] in IDF
 
 
 def search():
@@ -159,7 +162,9 @@ def search():
         data = json.loads(r.read())
     if "errors" in data:
         raise RuntimeError(data["errors"])
-    return [i for i in data.get("results", {}).get("items", []) if is_idf(i)]
+    all_items = data.get("results", {}).get("items", [])
+    S["total"] = len(all_items)
+    return [i for i in all_items if is_idf(i)]
 
 
 def rent(acc):
@@ -191,16 +196,19 @@ def check():
     try:
         items = search()
         ids = {i["id"] for i in items}
+        failed = set()
         if S["seen"] is not None:
             for i in items:
-                if i["id"] not in S["seen"]:
-                    alert_new(i)
+                if i["id"] not in S["seen"] and not alert_new(i):
+                    failed.add(i["id"])  # pas marqué "vu" -> on réessaie au prochain check
         S["items"] = {i["id"]: i for i in items}
-        if S["seen"] != ids:
-            S["seen"] = ids
+        new_seen = ids - failed
+        if S["seen"] != new_seen:
+            S["seen"] = new_seen
             save()
         S["err"] = None
-        print(f"[{now_str()}] OK {len(ids)} logements", flush=True)
+        print(f"[{now_str()}] OK {len(ids)} logements IdF (sur {S['total']} annonces CROUS)"
+              + (f" | {len(failed)} alerte(s) non envoyée(s)" if failed else ""), flush=True)
     except Exception as e:
         S["err"] = str(e)
         print(f"[{now_str()}] ERREUR: {e}", flush=True)
@@ -235,6 +243,9 @@ def main():
             except Exception as e:
                 print("handle err:", e, flush=True)
 
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
