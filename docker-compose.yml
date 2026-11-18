@@ -1,0 +1,11 @@
+services:
+  crous-bot:
+    build: .
+    restart: unless-stopped
+    environment:
+      TELEGRAM_TOKEN: ${TELEGRAM_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      CROUS_POLL_INTERVAL: "30"
+      STATE_FILE: /data/seen.json
+    volumes:
+      - ./data:/data
