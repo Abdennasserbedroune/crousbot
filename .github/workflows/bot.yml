@@ -21,6 +21,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CROUS_TOOL_ID: "48"
           CROUS_POLL_INTERVAL: "30"
           MAX_RUNTIME: "20400"
       - uses: actions/cache/save@v4
